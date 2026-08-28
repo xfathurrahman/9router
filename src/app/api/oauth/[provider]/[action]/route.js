@@ -322,21 +322,10 @@ export async function POST(request, { params }) {
         if (accountId) providerSpecificData.chatgptAccountId = accountId;
         if (planType) providerSpecificData.chatgptPlanType = planType;
 
-        // Accept refreshToken + expiresIn from body for non-codex providers
-        // (codebuddy-cn direct exchange sends full token pair)
-        const refreshToken = body.refreshToken || body.refresh_token || "";
-        const expiresIn = body.expiresIn || body.expires_in || null;
-        const expiresAt = expiresIn
-          ? new Date(Date.now() + expiresIn * 1000).toISOString()
-          : null;
-
         const connection = await createProviderConnection({
           provider,
           authType: "access_token",
           accessToken: code,
-          ...(refreshToken ? { refreshToken } : {}),
-          ...(expiresIn ? { expiresIn } : {}),
-          ...(expiresAt ? { expiresAt } : {}),
           email: email || null,
           providerSpecificData,
           testStatus: "active",
