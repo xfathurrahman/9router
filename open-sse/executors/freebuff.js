@@ -33,38 +33,41 @@ export const FREEBUFF_SYSTEM_MARKER =
   "to code with AI for free.";
 
 // Free-mode root agent per model — REVERSE ENGINEERED from the freebuff CLI
-// binary 0.0.166 (~/.config/manicode/freebuff), constants block s1():
-//   UM="deepseek/deepseek-v4-flash" -> PaA.UM="base2-free-deepseek-flash"
-//   _P="minimax/minimax-m3"         -> "base2-free-minimax-m3"
-//   bU="openai/gpt-5.6-luna"        -> "base2-free-luna"
-//   ha="upstage/solar-pro4"         -> "base2-free-solar-pro4"
-//   lU="deepseek/deepseek-v4-pro"   -> "base2-free-deepseek"
-//   S8="z-ai/glm-5.2"               -> "base2-free-glm"
-//   fP="z-ai/glm-5.3-flash"         -> "base2-free-glm-5-3-flash"
-//   xg="crof/kimi-k3-eco"           -> "base2-free-kimi-k3-eco"
-//   o2="anthropic/claude-fable-5"   -> "base2-free-fable"
-//   $9="stealth/ox-alpha"           -> "base2-free-ox-alpha"
-//   Kg="meta/muse-spark-1.2-contributor" -> "base2-free-muse-spark"
-//   IU="mimo/mimo-v2.5" (default)   -> "base2-free-mimo"
-// NOTE: old adapter.py used "base2-free" for mimo — upstream now rejects
-// unknown agents with 404 "No endpoints found for <model>".
+// binary 0.0.166 (~/.config/manicode/freebuff), map PaA/CuH (base3):
+//   UM="deepseek/deepseek-v4-flash" -> "base3-free-deepseek-flash"
+//   _P="minimax/minimax-m3"         -> "base3-free-minimax-m3"
+//   bU="openai/gpt-5.6-luna"        -> "base3-free-luna"
+//   ha="upstage/solar-pro4"         -> "base3-free-solar-pro4"
+//   lU="deepseek/deepseek-v4-pro"   -> "base3-free-deepseek"
+//   S8="z-ai/glm-5.2"               -> "base3-free-glm"
+//   fP="z-ai/glm-5.3-flash"         -> "base3-free-glm-5-3-flash"
+//   xg="crof/kimi-k3-eco"           -> "base3-free-kimi-k3-eco"
+//   w2="openai/gpt-5.6-luna-es"     -> "base3-free-luna-es"
+//   o2="anthropic/claude-fable-5"   -> "base3-free-fable"
+//   $9="stealth/ox-alpha"           -> "base3-free-ox-alpha"
+//   Kg="meta/muse-spark-1.2-contributor" -> "base3-free-muse-spark"
+//   IU="mimo/mimo-v2.5" (default)   -> "base3-free-mimo"
+// NOTE: base2-free-* agents are RETIRED upstream (403 free_mode_legacy_luna_agent);
+// the CLI 0.0.166 uses base3-free-* for freebuff chat (agent id starting with
+// base2-free OR base3-free is tagged source freebuff_web). Claude Fable has no
+// base3 entry in PaA (root agents) but does in CuH — included.
 const MODEL_AGENT = {
-  "mimo/mimo-v2.5": "base2-free-mimo",
-  "mimo/mimo-v2.5-pro": "base2-free-mimo",
-  "deepseek/deepseek-v4-flash": "base2-free-deepseek-flash",
-  "deepseek/deepseek-v4-pro": "base2-free-deepseek",
-  "minimax/minimax-m3": "base2-free-minimax-m3",
-  "openai/gpt-5.6-luna": "base2-free-luna",
-  "openai/gpt-5.6-luna-es": "base2-free-luna-es",
-  "upstage/solar-pro4": "base2-free-solar-pro4",
-  "z-ai/glm-5.2": "base2-free-glm",
-  "z-ai/glm-5.3-flash": "base2-free-glm-5-3-flash",
-  "crof/kimi-k3-eco": "base2-free-kimi-k3-eco",
-  "anthropic/claude-fable-5": "base2-free-fable",
-  "stealth/ox-alpha": "base2-free-ox-alpha",
-  "meta/muse-spark-1.2-contributor": "base2-free-muse-spark",
+  "mimo/mimo-v2.5": "base3-free-mimo",
+  "mimo/mimo-v2.5-pro": "base3-free-mimo",
+  "deepseek/deepseek-v4-flash": "base3-free-deepseek-flash",
+  "deepseek/deepseek-v4-pro": "base3-free-deepseek",
+  "minimax/minimax-m3": "base3-free-minimax-m3",
+  "openai/gpt-5.6-luna": "base3-free-luna",
+  "openai/gpt-5.6-luna-es": "base3-free-luna-es",
+  "upstage/solar-pro4": "base3-free-solar-pro4",
+  "z-ai/glm-5.2": "base3-free-glm",
+  "z-ai/glm-5.3-flash": "base3-free-glm-5-3-flash",
+  "crof/kimi-k3-eco": "base3-free-kimi-k3-eco",
+  "anthropic/claude-fable-5": "base3-free-fable",
+  "stealth/ox-alpha": "base3-free-ox-alpha",
+  "meta/muse-spark-1.2-contributor": "base3-free-muse-spark",
 };
-const DEFAULT_AGENT = "base2-free-mimo";
+const DEFAULT_AGENT = "base3-free-mimo";
 
 // Per-token session cache — upstream allows ONE active session per account
 // (409 model_locked proves it). Value: { instanceId, expiresAt(ms), model }.
