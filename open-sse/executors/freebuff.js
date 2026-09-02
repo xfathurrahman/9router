@@ -69,6 +69,12 @@ const MODEL_AGENT = {
 };
 const DEFAULT_AGENT = "base3-free-mimo";
 
+// FREEBUFF-PATCH failover: upstream capacity is per-model and fluctuates —
+// a model without free capacity answers 404 {"No endpoints found"} with a
+// retry-after header. When that happens, hop the (single) session to an
+// unmetered fallback model so the request still completes.
+const FALLBACK_MODELS = ["z-ai/glm-5.3-flash", "mimo/mimo-v2.5"];
+
 // Per-token session cache — upstream allows ONE active session per account
 // (409 model_locked proves it). Value: { instanceId, expiresAt(ms), model }.
 // Requesting a different model ends the current session and re-mints (the
@@ -235,7 +241,7 @@ export class FreebuffExecutor extends BaseExecutor {
     const transformedBody = this.transformRequest(model, body, stream);
     const headers = this.buildHeaders(credentials, stream);
 
-    const requestedModel = model || DEFAULT_MODEL;
+    let requestedModel = model || DEFAULT_MODEL;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       let session;
@@ -279,6 +285,20 @@ export class FreebuffExecutor extends BaseExecutor {
         signal,
       }, proxyOptions);
 
+      if (response.status === 404) {
+        // "No endpoints found for <model>" = no free capacity for this model
+        // right now (upstream sends retry-after). Move the session to an
+        // unmetered fallback model and retry within the attempt budget.
+        const errText = (await response.text()).slice(0, 300);
+        finishRun(authToken, runId, proxyOptions);
+        const alt = FALLBACK_MODELS.find((m) => m !== sessionModel);
+        if (alt && attempt < 3) {
+          log?.debug?.("RETRY", `Freebuff 404 no-endpoints (${sessionModel}): ${errText.slice(0, 120)} — switching session to ${alt}`);
+          resetSession(authToken);
+          requestedModel = alt;
+          continue;
+        }
+      }
       if (response.status === 409) {
         // Session raced/switched underneath us — drop and re-mint.
         const errText = (await response.text()).slice(0, 300);
@@ -308,7 +328,7 @@ export class FreebuffExecutor extends BaseExecutor {
 
 export const __test__ = {
   ensureSession, mintSession, deleteSession, startRun, finishRun, resetSession,
-  FREEBUFF_SYSTEM_MARKER, MODEL_AGENT, DEFAULT_MODEL, CLI_UA,
+  FREEBUFF_SYSTEM_MARKER, MODEL_AGENT, DEFAULT_MODEL, CLI_UA, FALLBACK_MODELS,
 };
 
 export default FreebuffExecutor;
