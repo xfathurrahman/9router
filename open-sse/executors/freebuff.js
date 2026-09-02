@@ -20,17 +20,10 @@ const SESSION_URL = `${API_BASE}/api/v1/freebuff/session`;
 const RUNS_URL = `${API_BASE}/api/v1/agent-runs`;
 const DEFAULT_MODEL = "mimo/mimo-v2.5";
 
-// FREEBUFF-PATCH failover: upstream capacity is per-model and fluctuates —
-// a missing endpoint answers 404 {"No endpoints found for <model>"} with a
-// retry-after header. When that happens, fall through the unmetered chain
-// (vendor snapshot 0.0.161: GLM 5.3 Flash / DeepSeek V4 Flash / MiMo are
-// unmetered) so the request still completes instead of erroring.
-const FAILOVER_CHAIN = [
-  "z-ai/glm-5.3-flash",
-  "deepseek/deepseek-v4-flash",
-  "mimo/mimo-v2.5",
-];
-const FAILOVER_SET = new Set(FAILOVER_CHAIN);
+// FREEBUFF-PATCH notes: upstream allows ONE live session per account with
+// the model fixed per session (409 model_locked). The executor ends and
+// re-mints the session when the requested model changes, and retries once
+// on 428/409/429 (session races / capacity).
 
 // Anti-abuse gate: first system message must carry the "Buffy" identity marker
 // (else 403 free_mode_cli_required).
@@ -73,7 +66,10 @@ const MODEL_AGENT = {
 };
 const DEFAULT_AGENT = "base2-free-mimo";
 
-// Per-token+model session cache: `${authToken}|${model}` -> { instanceId, expiresAt(ms), model }
+// Per-token session cache — upstream allows ONE active session per account
+// (409 model_locked proves it). Value: { instanceId, expiresAt(ms), model }.
+// Requesting a different model ends the current session and re-mints (the
+// official CLI does exactly this on model_locked).
 const sessionCache = new Map();
 const SESSION_EXPIRY_BUFFER_MS = 60_000;
 const SESSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -84,17 +80,21 @@ function randomId(len) {
   return id;
 }
 
-function resetSession(authToken, model) {
-  if (model) sessionCache.delete(`${authToken}|${model}`);
-  else for (const k of [...sessionCache.keys()]) if (k.startsWith(`${authToken}|`)) sessionCache.delete(k);
+function resetSession(authToken) {
+  sessionCache.delete(authToken);
 }
 
-async function ensureSession(authToken, model, proxyOptions, log) {
-  const cacheKey = `${authToken}|${model || DEFAULT_MODEL}`;
-  const cached = sessionCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached;
-  }
+async function deleteSession(authToken, proxyOptions) {
+  // Best-effort: end the account's active session (CLI: x5("DELETE", token)).
+  try {
+    await proxyAwareFetch(SESSION_URL, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}`, "User-Agent": CLI_UA },
+    }, proxyOptions);
+  } catch { /* ignore */ }
+}
+
+async function mintSession(authToken, model, proxyOptions, log) {
   const body = {
     provider: "gravity",
     messages: [],
@@ -102,25 +102,54 @@ async function ensureSession(authToken, model, proxyOptions, log) {
     device: { os: "linux", timezone: "UTC", locale: "en-US" },
     surface: "cli",
   };
-  const headers = {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "User-Agent": CLI_UA,
-    Authorization: `Bearer ${authToken}`,
-  };
-  if (model && model !== DEFAULT_MODEL) headers["x-freebuff-model"] = model;
-  const resp = await proxyAwareFetch(SESSION_URL, { method: "POST", headers, body: JSON.stringify(body) }, proxyOptions);
+  const doMint = () => proxyAwareFetch(SESSION_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": CLI_UA,
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(body),
+  }, proxyOptions);
+
+  let resp = await doMint();
+  // 409 model_locked / model_unavailable: the account's single session slot is
+  // held by another model (or the model is out of capacity). End the session
+  // and re-mint once — same recovery the CLI session loop performs.
+  if (resp.status === 409) {
+    const err = await resp.json().catch(() => ({}));
+    if (err?.status === "model_locked" || err?.status === "model_unavailable") {
+      log?.debug?.("AUTH", `Freebuff ${err.status} (${err.currentModel || "?"} -> ${model || "default"}) — ending session & re-minting`);
+      await deleteSession(authToken, proxyOptions);
+      await new Promise((r) => setTimeout(r, 500));
+      resp = await doMint();
+    }
+  }
   const text = await resp.text();
   if (!resp.ok) throw new Error(`Freebuff session failed: ${resp.status} ${text.slice(0, 200)}`);
   let data;
   try { data = JSON.parse(text); } catch { throw new Error("Freebuff session returned non-JSON"); }
-  const resolved = data.model || model || DEFAULT_MODEL;
+  return data;
+}
+
+async function ensureSession(authToken, model, proxyOptions, log) {
+  const want = model || DEFAULT_MODEL;
+  const cached = sessionCache.get(authToken);
+  if (cached && Date.now() < cached.expiresAt) {
+    if (cached.model === want) return cached;
+    // One live session on another model — end it and switch.
+    log?.debug?.("AUTH", `Freebuff switching session model ${cached.model} -> ${want}`);
+    await deleteSession(authToken, proxyOptions);
+    sessionCache.delete(authToken);
+  }
+  const data = await mintSession(authToken, want, proxyOptions, log);
   const entry = {
     instanceId: data.instanceId,
-    model: resolved,
+    model: data.model || want,
     expiresAt: Date.now() + Math.max(1, (data.remainingMs || 3_600_000) / 1000 - 60) * 1000,
   };
-  sessionCache.set(cacheKey, entry);
+  sessionCache.set(authToken, entry);
   log?.debug?.("AUTH", `Freebuff session minted: ${entry.instanceId} (model ${entry.model})`);
   return entry;
 }
@@ -195,107 +224,78 @@ export class FreebuffExecutor extends BaseExecutor {
     const headers = this.buildHeaders(credentials, stream);
 
     const requestedModel = model || DEFAULT_MODEL;
-    // Candidate chain: requested model first, then unmetered fallbacks
-    // (deduped). Upstream may also coerce the session to a different model
-    // (limited tier -> mimo) — session.model wins over the candidate.
-    const chain = [requestedModel, ...FAILOVER_CHAIN.filter((m) => m !== requestedModel)];
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       let session;
       try {
-        session = await ensureSession(authToken, chain[0], proxyOptions, log);
+        session = await ensureSession(authToken, requestedModel, proxyOptions, log);
       } catch (error) {
         log?.error?.("AUTH", `Freebuff session error: ${error.message}`);
         throw error;
       }
-      // Upstream can coerce the model (tier/availability); trust the session.
-      const sessionModel = session.model || chain[0];
-      const candidates = sessionModel === chain[0]
-        ? chain
-        : [sessionModel, ...chain.filter((m) => m !== sessionModel)];
+      // Upstream owns model assignment: one live session per account, model
+      // fixed per session (limited tier -> mimo; availability fallbacks too).
+      const sessionModel = session.model || requestedModel;
+      transformedBody.model = sessionModel;
 
       let runId = "";
-      let lastModel = candidates[0];
-      let upstream = null;
-      let errText = "";
-
-      for (const candidateModel of candidates) {
-        transformedBody.model = candidateModel;
-        let cid;
-        try {
-          cid = await startRun(authToken, MODEL_AGENT[candidateModel] || DEFAULT_AGENT, proxyOptions, log);
-        } catch (error) {
-          log?.error?.("FETCH", `Freebuff START error (${candidateModel}): ${error.message}`);
-          throw error;
-        }
-        runId = cid;
-        lastModel = candidateModel;
-
-        // The "CLI envelope" — upstream rejects the request without all of these:
-        const envelope = {
-          ...transformedBody,
-          max_tokens: transformedBody.max_tokens || 4096,
-          codebuff_metadata: {
-            run_id: runId, // must be inside codebuff_metadata (top-level runId -> 400)
-            client_id: randomId(13), // fresh per call (fixed values get fingerprinted)
-            cost_mode: "free", // omit -> 402 out of credits
-            freebuff_instance_id: session.instanceId,
-          },
-          provider: { data_collection: "deny" },
-          stop: ["cb_easp"],
-        };
-
-        const response = await proxyAwareFetch(this.buildUrl(), {
-          method: "POST",
-          headers,
-          body: JSON.stringify(envelope),
-          signal,
-        }, proxyOptions);
-
-        if (response.status !== 404) {
-          upstream = response;
-          break;
-        }
-        // 404 "No endpoints found for <model>" = no free capacity for this
-        // model right now (upstream sends retry-after). Remember the body,
-        // finish the run, and try the next candidate.
-        errText = (await response.text()).slice(0, 300);
-        finishRun(authToken, runId, proxyOptions);
-        log?.debug?.("RETRY", `Freebuff 404 no-endpoints (${candidateModel}): ${errText} — trying next model`);
+      try {
+        runId = await startRun(authToken, MODEL_AGENT[sessionModel] || DEFAULT_AGENT, proxyOptions, log);
+      } catch (error) {
+        log?.error?.("FETCH", `Freebuff START error (${sessionModel}): ${error.message}`);
+        throw error;
       }
 
-      if (!upstream) {
-        // Every candidate 404'd. For unmetered targets, retry once with a
-        // fresh session (capacity is session-bound); otherwise surface the error.
-        if (FAILOVER_SET.has(candidates[candidates.length - 1]) && attempt < 2) {
-          resetSession(authToken, sessionModel);
-          continue;
-        }
-        throw new Error(`[freebuff/${lastModel}] [404]: {"error":{"message":"No endpoints found for ${lastModel}.","code":404,"type":null,"param":null}} — upstream capacity exhausted for all fallback models, retry later`);
+      // The "CLI envelope" — upstream rejects the request without all of these:
+      const envelope = {
+        ...transformedBody,
+        max_tokens: transformedBody.max_tokens || 4096,
+        codebuff_metadata: {
+          run_id: runId, // must be inside codebuff_metadata (top-level runId -> 400)
+          client_id: randomId(13), // fresh per call (fixed values get fingerprinted)
+          cost_mode: "free", // omit -> 402 out of credits
+          freebuff_instance_id: session.instanceId,
+        },
+        provider: { data_collection: "deny" },
+        stop: ["cb_easp"],
+      };
+
+      const response = await proxyAwareFetch(this.buildUrl(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(envelope),
+        signal,
+      }, proxyOptions);
+
+      if (response.status === 409) {
+        // Session raced/switched underneath us — drop and re-mint.
+        const errText = (await response.text()).slice(0, 300);
+        finishRun(authToken, runId, proxyOptions);
+        log?.debug?.("RETRY", `Freebuff 409: ${errText} — re-minting session`);
+        resetSession(authToken);
+        if (attempt < 3) continue;
+      }
+      if (response.status === 428 || response.status === 429) {
+        const errText = (await response.text()).slice(0, 300);
+        finishRun(authToken, runId, proxyOptions);
+        log?.debug?.("RETRY", `Freebuff upstream ${response.status}: ${errText} — re-minting session`);
+        resetSession(authToken);
+        await new Promise((r) => setTimeout(r, response.status === 429 ? 2000 : 0));
+        if (attempt < 3) continue;
       }
 
       finishRun(authToken, runId, proxyOptions);
 
-      // Retryable session problems: 428 session ended/stolen, 409 superseded,
-      // 429 capacity-deferred. Drop the cached session and re-mint once.
-      if ([428, 409, 429].includes(upstream.status) && attempt < 2) {
-        const retryText = (await upstream.text()).slice(0, 300);
-        log?.debug?.("RETRY", `Freebuff upstream ${upstream.status}: ${retryText} — re-minting session`);
-        resetSession(authToken, sessionModel);
-        await new Promise((r) => setTimeout(r, upstream.status === 429 ? 2000 : 0));
-        continue;
+      if (sessionModel !== requestedModel) {
+        log?.debug?.("MODEL", `Freebuff session serves ${sessionModel} (requested ${requestedModel})`);
       }
-
-      if (upstream.status !== 404 && lastModel !== requestedModel) {
-        log?.debug?.("MODEL", `Freebuff served ${requestedModel} via fallback model ${lastModel}`);
-      }
-      return { response: upstream, url: this.buildUrl(), headers, transformedBody };
+      return { response, url: this.buildUrl(), headers, transformedBody };
     }
   }
 }
 
 export const __test__ = {
-  ensureSession, startRun, finishRun, resetSession,
+  ensureSession, mintSession, deleteSession, startRun, finishRun, resetSession,
   FREEBUFF_SYSTEM_MARKER, MODEL_AGENT, DEFAULT_MODEL, CLI_UA,
 };
 
