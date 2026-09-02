@@ -38,20 +38,25 @@ export default {
       scheme: "bearer",
     },
   },
-  // Model ids from the freebuff CLI 0.0.166 binary (constants: UM, lU, _P, bU,
-  // w2, ha, S8, fP, xg, o2, $9, Kg, IU). Free (non-premium): mimo-v2.5,
-  // glm-5.3-flash, deepseek-v4-flash. The rest are premium tier.
+  // Model ids + context windows from the freebuff CLI 0.0.166 binary
+  // (constants map $zH). Status per vendor notes (snapshot 0.0.161):
+  //   unmetered: mimo-v2.5, glm-5.3-flash, deepseek-v4-flash
+  //   premium (shared 5 sessions/day): gpt-5.6-luna, solar-pro4
+  //   withdrawn upstream: minimax-m3 (08-20), deepseek-v4-pro (08-26),
+  //     ox-alpha (08-27) — kept listed; executor falls back to default model
+  //   glm-5.2: locked behind referral unlock
+  //   claude-fable-5: premium, free capacity not opened yet (fallback)
   models: [
-    { id: "mimo/mimo-v2.5", name: "MiMo 2.5" },
-    { id: "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash" },
-    { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
-    { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
-    { id: "minimax/minimax-m3", name: "MiniMax M3" },
-    { id: "openai/gpt-5.6-luna", name: "GPT-5.6 Luna" },
-    { id: "upstage/solar-pro4", name: "Solar Pro 4" },
-    { id: "z-ai/glm-5.2", name: "GLM 5.2" },
-    { id: "anthropic/claude-fable-5", name: "Claude Fable 5" },
-    { id: "stealth/ox-alpha", name: "Ox Alpha" },
+    { id: "mimo/mimo-v2.5", name: "MiMo 2.5", contextWindow: 1048576, maxOutput: 65536 },
+    { id: "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash", contextWindow: 1000000, maxOutput: 65536 },
+    { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", contextWindow: 1048576, maxOutput: 65536 },
+    { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", contextWindow: 1048576, maxOutput: 65536 },
+    { id: "minimax/minimax-m3", name: "MiniMax M3", contextWindow: 524288, maxOutput: 65536 },
+    { id: "openai/gpt-5.6-luna", name: "GPT-5.6 Luna", contextWindow: 1000000, maxOutput: 65536 },
+    { id: "upstage/solar-pro4", name: "Solar Pro 4", contextWindow: 500000, maxOutput: 65536 },
+    { id: "z-ai/glm-5.2", name: "GLM 5.2", contextWindow: 1000000, maxOutput: 65536 },
+    { id: "anthropic/claude-fable-5", name: "Claude Fable 5", contextWindow: 1000000, maxOutput: 65536 },
+    { id: "stealth/ox-alpha", name: "Ox Alpha", contextWindow: 1000000, maxOutput: 65536 },
   ],
   oauth: {
     baseUrl: "https://www.codebuff.com",
