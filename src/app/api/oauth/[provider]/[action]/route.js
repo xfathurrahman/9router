@@ -301,6 +301,30 @@ export async function POST(request, { params }) {
         }
       }
 
+      // FREEBUFF-PATCH: raw CLI token (cb_...) pasted/exchanged directly —
+      // create the connection without any device-code round trip.
+      if (provider === "freebuff" && code && typeof code === "string"
+          && !code.startsWith("eyJ") && code.includes("_")) {
+        const connection = await createProviderConnection({
+          provider,
+          authType: "access_token",
+          accessToken: code,
+          email: body?.meta?.email || null,
+          displayName: body?.meta?.name || body?.name || null,
+          providerSpecificData: { authMethod: "cli_token" },
+          testStatus: "active",
+        });
+        return NextResponse.json({
+          success: true,
+          connection: {
+            id: connection.id,
+            provider: connection.provider,
+            email: connection.email,
+            displayName: connection.displayName,
+          }
+        });
+      }
+
       // Detect if "code" is actually a raw JWT access token (starts with eyJ)
       if (code && code.startsWith("eyJ") && code.includes(".")) {
         const { extractCodexAccountInfo } = await import("@/lib/oauth/providers");
