@@ -132,20 +132,20 @@ async function mintSession(authToken, model, proxyOptions, log) {
   };
 
   let resp = await doMint();
-  // 409 model_locked: the account's single session slot is held by another
-  // model. End the session and re-mint once — same recovery the CLI loop
-  // performs. 409 model_unavailable: the requested model has no free capacity
-  // right now — the CLI falls back to the account default (re-mint WITHOUT the
-  // x-freebuff-model header), so the request still completes.
-  if (resp.status === 409) {
+  // 409 recovery loop. model_locked: the account's single session slot is
+  // held by another model — DELETE then re-mint (CLI behavior). Upstream
+  // session state is eventually consistent, so the first DELETE may not have
+  // propagated yet: retry with growing backoff. model_unavailable: the
+  // requested model has no free capacity — the CLI falls back to the account
+  // default (re-mint WITHOUT the x-freebuff-model header).
+  for (let i = 0; i < 3 && resp.status === 409; i++) {
     const err = await resp.json().catch(() => ({}));
-    if (err?.status === "model_locked" || err?.status === "model_unavailable") {
-      const fallbackToDefault = err.status === "model_unavailable";
-      log?.debug?.("AUTH", `Freebuff ${err.status} (${err.currentModel || "?"} -> ${fallbackToDefault ? "default" : model || "default"}) — ending session & re-minting`);
-      await deleteSession(authToken, proxyOptions);
-      await new Promise((r) => setTimeout(r, 500));
-      resp = fallbackToDefault ? await doMint(/* noModel */ true) : await doMint();
-    }
+    if (err?.status !== "model_locked" && err?.status !== "model_unavailable") break;
+    const fallbackToDefault = err.status === "model_unavailable";
+    log?.debug?.("AUTH", `Freebuff ${err.status} (${err.currentModel || "?"} -> ${fallbackToDefault ? "default" : model || "default"}) — delete+re-mint (${i + 1}/3)`);
+    await deleteSession(authToken, proxyOptions);
+    await new Promise((r) => setTimeout(r, 500 * (i + 1) * (i + 1)));
+    resp = await doMint(fallbackToDefault);
   }
   const text = await resp.text();
   if (!resp.ok) throw new Error(`Freebuff session failed: ${resp.status} ${text.slice(0, 200)}`);
