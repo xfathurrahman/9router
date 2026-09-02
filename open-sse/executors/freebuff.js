@@ -300,15 +300,18 @@ export class FreebuffExecutor extends BaseExecutor {
       if (response.status === 404 && attempt < MAX_ATTEMPTS) {
         // "No endpoints found for <model>" = no free capacity for this model
         // right now (upstream sends retry-after). Move the session to an
-        // unmetered fallback model and retry. On the final attempt we fall
-        // through WITHOUT consuming the body, so the client still sees the
-        // upstream error detail.
+        // unmetered fallback model and retry. The server-side session must be
+        // DELETEd explicitly (local reset alone leaves it live upstream, and
+        // rapid mint/delete churn trips a soft throttle that 404s even the
+        // healthy fallback models), plus a short settle delay per hop.
         const errText = (await response.text().catch(() => "")).slice(0, 300);
         finishRun(authToken, runId, proxyOptions);
         const alt = FALLBACK_MODELS.find((m) => m !== sessionModel);
         if (alt) {
           log?.debug?.("RETRY", `Freebuff 404 no-endpoints (${sessionModel}): ${errText.slice(0, 120)} — switching session to ${alt}`);
           resetSession(authToken);
+          await deleteSession(authToken, proxyOptions);
+          await new Promise((r) => setTimeout(r, 1000));
           requestedModel = alt;
           continue;
         }
