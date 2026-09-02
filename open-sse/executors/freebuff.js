@@ -102,16 +102,22 @@ async function mintSession(authToken, model, proxyOptions, log) {
     device: { os: "linux", timezone: "UTC", locale: "en-US" },
     surface: "cli",
   };
-  const doMint = () => proxyAwareFetch(SESSION_URL, {
-    method: "POST",
-    headers: {
+  const doMint = () => {
+    const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
       "User-Agent": CLI_UA,
       Authorization: `Bearer ${authToken}`,
-    },
-    body: JSON.stringify(body),
-  }, proxyOptions);
+    };
+    // The requested model rides on this header; without it upstream assigns
+    // the account default and every request lands on the same model.
+    if (model && model !== DEFAULT_MODEL) headers["x-freebuff-model"] = model;
+    return proxyAwareFetch(SESSION_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    }, proxyOptions);
+  };
 
   let resp = await doMint();
   // 409 model_locked / model_unavailable: the account's single session slot is
