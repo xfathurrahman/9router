@@ -105,7 +105,7 @@ async function mintSession(authToken, model, proxyOptions, log) {
     device: { os: "linux", timezone: "UTC", locale: "en-US" },
     surface: "cli",
   };
-  const doMint = () => {
+  const doMint = (noModel = false) => {
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
@@ -114,7 +114,7 @@ async function mintSession(authToken, model, proxyOptions, log) {
     };
     // The requested model rides on this header; without it upstream assigns
     // the account default and every request lands on the same model.
-    if (model && model !== DEFAULT_MODEL) headers["x-freebuff-model"] = model;
+    if (!noModel && model && model !== DEFAULT_MODEL) headers["x-freebuff-model"] = model;
     return proxyAwareFetch(SESSION_URL, {
       method: "POST",
       headers,
@@ -123,16 +123,19 @@ async function mintSession(authToken, model, proxyOptions, log) {
   };
 
   let resp = await doMint();
-  // 409 model_locked / model_unavailable: the account's single session slot is
-  // held by another model (or the model is out of capacity). End the session
-  // and re-mint once — same recovery the CLI session loop performs.
+  // 409 model_locked: the account's single session slot is held by another
+  // model. End the session and re-mint once — same recovery the CLI loop
+  // performs. 409 model_unavailable: the requested model has no free capacity
+  // right now — the CLI falls back to the account default (re-mint WITHOUT the
+  // x-freebuff-model header), so the request still completes.
   if (resp.status === 409) {
     const err = await resp.json().catch(() => ({}));
     if (err?.status === "model_locked" || err?.status === "model_unavailable") {
-      log?.debug?.("AUTH", `Freebuff ${err.status} (${err.currentModel || "?"} -> ${model || "default"}) — ending session & re-minting`);
+      const fallbackToDefault = err.status === "model_unavailable";
+      log?.debug?.("AUTH", `Freebuff ${err.status} (${err.currentModel || "?"} -> ${fallbackToDefault ? "default" : model || "default"}) — ending session & re-minting`);
       await deleteSession(authToken, proxyOptions);
       await new Promise((r) => setTimeout(r, 500));
-      resp = await doMint();
+      resp = fallbackToDefault ? await doMint(/* noModel */ true) : await doMint();
     }
   }
   const text = await resp.text();
