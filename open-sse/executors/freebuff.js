@@ -80,6 +80,9 @@ const FALLBACK_MODELS = ["z-ai/glm-5.3-flash", "mimo/mimo-v2.5"];
 // Requesting a different model ends the current session and re-mints (the
 // official CLI does exactly this on model_locked).
 const sessionCache = new Map();
+// Dedup concurrent mints for the same token+model (client auto-retries fire
+// parallel requests; two mints racing would delete each other's sessions).
+const pendingMints = new Map();
 const SESSION_EXPIRY_BUFFER_MS = 60_000;
 const SESSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -161,15 +164,21 @@ async function ensureSession(authToken, model, proxyOptions, log) {
     await deleteSession(authToken, proxyOptions);
     sessionCache.delete(authToken);
   }
-  const data = await mintSession(authToken, want, proxyOptions, log);
-  const entry = {
-    instanceId: data.instanceId,
-    model: data.model || want,
-    expiresAt: Date.now() + Math.max(1, (data.remainingMs || 3_600_000) / 1000 - 60) * 1000,
-  };
-  sessionCache.set(authToken, entry);
-  log?.debug?.("AUTH", `Freebuff session minted: ${entry.instanceId} (model ${entry.model})`);
-  return entry;
+  const inflight = pendingMints.get(authToken);
+  if (inflight && inflight.model === want) return inflight.promise;
+  const promise = (async () => {
+    const data = await mintSession(authToken, want, proxyOptions, log);
+    const entry = {
+      instanceId: data.instanceId,
+      model: data.model || want,
+      expiresAt: Date.now() + Math.max(1, (data.remainingMs || 3_600_000) / 1000 - 60) * 1000,
+    };
+    sessionCache.set(authToken, entry);
+    log?.debug?.("AUTH", `Freebuff session minted: ${entry.instanceId} (model ${entry.model})`);
+    return entry;
+  })().finally(() => pendingMints.delete(authToken));
+  pendingMints.set(authToken, { model: want, promise });
+  return promise;
 }
 
 async function startRun(authToken, agentId, proxyOptions, log) {
@@ -242,8 +251,11 @@ export class FreebuffExecutor extends BaseExecutor {
     const headers = this.buildHeaders(credentials, stream);
 
     let requestedModel = model || DEFAULT_MODEL;
+    // Budget covers the full hop chain: requested model + 2 fallbacks, with
+    // headroom for one session race (428/409) — 5 total.
+    const MAX_ATTEMPTS = 5;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       let session;
       try {
         session = await ensureSession(authToken, requestedModel, proxyOptions, log);
@@ -285,35 +297,37 @@ export class FreebuffExecutor extends BaseExecutor {
         signal,
       }, proxyOptions);
 
-      if (response.status === 404) {
+      if (response.status === 404 && attempt < MAX_ATTEMPTS) {
         // "No endpoints found for <model>" = no free capacity for this model
         // right now (upstream sends retry-after). Move the session to an
-        // unmetered fallback model and retry within the attempt budget.
-        const errText = (await response.text()).slice(0, 300);
+        // unmetered fallback model and retry. On the final attempt we fall
+        // through WITHOUT consuming the body, so the client still sees the
+        // upstream error detail.
+        const errText = (await response.text().catch(() => "")).slice(0, 300);
         finishRun(authToken, runId, proxyOptions);
         const alt = FALLBACK_MODELS.find((m) => m !== sessionModel);
-        if (alt && attempt < 3) {
+        if (alt) {
           log?.debug?.("RETRY", `Freebuff 404 no-endpoints (${sessionModel}): ${errText.slice(0, 120)} — switching session to ${alt}`);
           resetSession(authToken);
           requestedModel = alt;
           continue;
         }
       }
-      if (response.status === 409) {
+      if (response.status === 409 && attempt < MAX_ATTEMPTS) {
         // Session raced/switched underneath us — drop and re-mint.
         const errText = (await response.text()).slice(0, 300);
         finishRun(authToken, runId, proxyOptions);
         log?.debug?.("RETRY", `Freebuff 409: ${errText} — re-minting session`);
         resetSession(authToken);
-        if (attempt < 3) continue;
+        continue;
       }
-      if (response.status === 428 || response.status === 429) {
+      if ((response.status === 428 || response.status === 429) && attempt < MAX_ATTEMPTS) {
         const errText = (await response.text()).slice(0, 300);
         finishRun(authToken, runId, proxyOptions);
         log?.debug?.("RETRY", `Freebuff upstream ${response.status}: ${errText} — re-minting session`);
         resetSession(authToken);
         await new Promise((r) => setTimeout(r, response.status === 429 ? 2000 : 0));
-        if (attempt < 3) continue;
+        continue;
       }
 
       finishRun(authToken, runId, proxyOptions);
