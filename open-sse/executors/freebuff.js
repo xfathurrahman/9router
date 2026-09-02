@@ -27,17 +27,39 @@ export const FREEBUFF_SYSTEM_MARKER =
   "behind the product, Freebuff, a tool where users can chat with you " +
   "to code with AI for free.";
 
-// Free-mode root agent per model (common/src/constants/free-agents.ts upstream).
+// Free-mode root agent per model — REVERSE ENGINEERED from the freebuff CLI
+// binary 0.0.166 (~/.config/manicode/freebuff), constants block s1():
+//   UM="deepseek/deepseek-v4-flash" -> PaA.UM="base2-free-deepseek-flash"
+//   _P="minimax/minimax-m3"         -> "base2-free-minimax-m3"
+//   bU="openai/gpt-5.6-luna"        -> "base2-free-luna"
+//   ha="upstage/solar-pro4"         -> "base2-free-solar-pro4"
+//   lU="deepseek/deepseek-v4-pro"   -> "base2-free-deepseek"
+//   S8="z-ai/glm-5.2"               -> "base2-free-glm"
+//   fP="z-ai/glm-5.3-flash"         -> "base2-free-glm-5-3-flash"
+//   xg="crof/kimi-k3-eco"           -> "base2-free-kimi-k3-eco"
+//   o2="anthropic/claude-fable-5"   -> "base2-free-fable"
+//   $9="stealth/ox-alpha"           -> "base2-free-ox-alpha"
+//   Kg="meta/muse-spark-1.2-contributor" -> "base2-free-muse-spark"
+//   IU="mimo/mimo-v2.5" (default)   -> "base2-free-mimo"
+// NOTE: old adapter.py used "base2-free" for mimo — upstream now rejects
+// unknown agents with 404 "No endpoints found for <model>".
 const MODEL_AGENT = {
-  "mimo/mimo-v2.5": "base2-free",
-  "minimax/minimax-m2.7": "base2-free",
-  "z-ai/glm-5.1": "base2-free",
-  "z-ai/glm-5.3-flash": "base2-free",
-  "google/gemini-3.1-pro-preview": "base2-free",
+  "mimo/mimo-v2.5": "base2-free-mimo",
+  "mimo/mimo-v2.5-pro": "base2-free-mimo",
   "deepseek/deepseek-v4-flash": "base2-free-deepseek-flash",
   "deepseek/deepseek-v4-pro": "base2-free-deepseek",
-  "moonshotai/kimi-k2.6": "base2-free-kimi",
+  "minimax/minimax-m3": "base2-free-minimax-m3",
+  "openai/gpt-5.6-luna": "base2-free-luna",
+  "openai/gpt-5.6-luna-es": "base2-free-luna-es",
+  "upstage/solar-pro4": "base2-free-solar-pro4",
+  "z-ai/glm-5.2": "base2-free-glm",
+  "z-ai/glm-5.3-flash": "base2-free-glm-5-3-flash",
+  "crof/kimi-k3-eco": "base2-free-kimi-k3-eco",
+  "anthropic/claude-fable-5": "base2-free-fable",
+  "stealth/ox-alpha": "base2-free-ox-alpha",
+  "meta/muse-spark-1.2-contributor": "base2-free-muse-spark",
 };
+const DEFAULT_AGENT = "base2-free-mimo";
 
 // Per-token session cache: authToken -> { instanceId, expiresAt(ms), model }
 const sessionCache = new Map();
@@ -172,7 +194,7 @@ export class FreebuffExecutor extends BaseExecutor {
 
       let runId;
       try {
-        runId = await startRun(authToken, MODEL_AGENT[requestModel] || "base2-free", proxyOptions, log);
+        runId = await startRun(authToken, MODEL_AGENT[requestModel] || DEFAULT_AGENT, proxyOptions, log);
       } catch (error) {
         log?.error?.("FETCH", `Freebuff START error: ${error.message}`);
         throw error;

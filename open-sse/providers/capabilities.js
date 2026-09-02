@@ -194,13 +194,18 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
-  // FREEBUFF-PATCH: Freebuff free tier — session-resolved model ids (vendor-prefixed).
+  // FREEBUFF-PATCH: Freebuff models — context windows from CLI 0.0.166 ($zH map).
   "freebuff": {
-    "mimo/mimo-v2.5":    { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 196608, maxOutput: 32768 },
-    "z-ai/glm-5.3-flash":{ vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
-    "deepseek/deepseek-v4-flash": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 50000 },
-    "minimax/minimax-m2.7":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
-    "moonshotai/kimi-k2.6":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 256000, maxOutput: 32000 },
+    "mimo/mimo-v2.5":    { vision: true, thinkingFormat: "openai", contextWindow: 131072, maxOutput: 32768 },
+    "z-ai/glm-5.3-flash":{ vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 48000 },
+    "deepseek/deepseek-v4-flash": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 50000 },
+    "deepseek/deepseek-v4-pro":   { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 50000 },
+    "minimax/minimax-m3":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 524288, maxOutput: 48000 },
+    "openai/gpt-5.6-luna":        { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 48000 },
+    "upstage/solar-pro4":         { reasoning: true, thinkingFormat: "openai", contextWindow: 500000, maxOutput: 48000 },
+    "z-ai/glm-5.2":               { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
+    "anthropic/claude-fable-5":   { vision: true, reasoning: true, thinkingFormat: "claude-adaptive", contextWindow: 200000, maxOutput: 48000 },
+    "stealth/ox-alpha":           { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 48000 },
   },
   // Poolside Laguna — OpenAI-compatible, all reasoning-capable (32K max output).
   "poolside": {
