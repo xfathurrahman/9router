@@ -66,6 +66,7 @@ import p63 from "./nebius.js";
 import p64 from "./nvidia.js";
 import p65 from "./ollama-local.js";
 import p66 from "./ollama.js";
+import p124 from "./freebuff.js"; // FREEBUFF-PATCH
 import p123 from "./ollama-search.js";
 import p67 from "./openai.js";
 import p68 from "./opencode-go.js";
@@ -247,4 +248,5 @@ export default [
   p120,
   p121,
   p122,
+  p124, // FREEBUFF-PATCH
 ];

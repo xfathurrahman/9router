@@ -194,6 +194,14 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
+  // FREEBUFF-PATCH: Freebuff free tier — session-resolved model ids (vendor-prefixed).
+  "freebuff": {
+    "mimo/mimo-v2.5":    { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 196608, maxOutput: 32768 },
+    "z-ai/glm-5.3-flash":{ vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
+    "deepseek/deepseek-v4-flash": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 50000 },
+    "minimax/minimax-m2.7":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
+    "moonshotai/kimi-k2.6":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 256000, maxOutput: 32000 },
+  },
   // Poolside Laguna — OpenAI-compatible, all reasoning-capable (32K max output).
   "poolside": {
     "laguna-s-2.1":  { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 32000 },
