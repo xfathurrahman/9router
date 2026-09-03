@@ -292,6 +292,8 @@ export default function ProvidersPage() {
   // (and sometimes "api_key"). Card stats must count both so totals match detail.
   // kiro has no authModes in registry but accepts both (headless uses "api_key").
   const dualAuthTypes = (info, key) => {
+    // Freebuff stores raw CLI/UUID tokens as authType "access_token" (FREEBUFF-PATCH)
+    if (key === "freebuff") return ["oauth", "apikey", "api_key", "access_token"];
     if (key === "kiro") return ["oauth", "apikey", "api_key"];
     const modes = info?.authModes;
     // Free-tier and API-key providers default to supporting apikey even when the
