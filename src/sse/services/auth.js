@@ -245,6 +245,31 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   // GitHub premium-request exhaustion is account-wide until the next UTC month.
   const githubResetAtMs = githubMonthlyResetMs(status, errorText, provider);
 
+  // FREEBUFF-PATCH: permanent account death (suspended/banned/country-blocked)
+  // must NOT take the transient modelLock_ cooldown path — a dead account would
+  // otherwise poison the model for 2 minutes per hit and 404-poison healthy
+  // sibling accounts through the lock replay. Disable the connection outright;
+  // the account will not recover on its own.
+  const lowerErr = typeof errorText === "string" ? errorText.toLowerCase() : "";
+  if (provider === "freebuff"
+      && (lowerErr.includes("account_suspended")
+          || lowerErr.includes("account_banned")
+          || lowerErr.includes("\"banned\"")
+          || lowerErr.includes("country_blocked"))) {
+    await updateProviderConnection(connectionId, {
+      isActive: false,
+      testStatus: "unavailable",
+      lastError: (typeof errorText === "string" ? errorText.slice(0, 200) : "account dead"),
+      errorCode: status,
+      lastErrorAt: new Date().toISOString(),
+      backoffLevel: 0,
+    });
+    const deadName = conn?.displayName || conn?.name || conn?.email || connectionId.slice(0, 8);
+    log.warn("AUTH", `${deadName} permanently dead [${status}] — connection disabled (FREEBUFF-PATCH)`);
+    console.error(`❌ ${provider} [${status}]: ${deadName} disabled (account dead)`);
+    return { shouldFallback: true, cooldownMs: 0 };
+  }
+
   // Provider-specific precise cooldown (e.g. codex usage_limit_reached resets_at) overrides backoff
   let shouldFallback, cooldownMs, newBackoffLevel;
   if (githubResetAtMs) {
