@@ -301,10 +301,12 @@ export async function POST(request, { params }) {
         }
       }
 
-      // FREEBUFF-PATCH: raw CLI token (cb_...) pasted/exchanged directly —
-      // create the connection without any device-code round trip.
+      // FREEBUFF-PATCH: raw CLI token (cb_... or UUID session token) pasted/
+      // exchanged directly — create the connection without any device-code
+      // round trip. Freebuff tokens are opaque (cb_xxx or plain UUID), so we
+      // accept any non-JWT string; JWTs (eyJ...) belong to other providers.
       if (provider === "freebuff" && code && typeof code === "string"
-          && !code.startsWith("eyJ") && code.includes("_")) {
+          && !code.startsWith("eyJ")) {
         const connection = await createProviderConnection({
           provider,
           authType: "access_token",
