@@ -88,10 +88,12 @@ const qoder = {
       refreshToken: tokens.refresh_token || null,
       expiresIn: tokens.expires_in,
       email,
-      displayName,
+      name: displayName || rawEmail || (userId ? `qoder-${userId.slice(0, 8)}` : null),
+      displayName: displayName || rawEmail || null,
       providerSpecificData: {
         authMethod: "device",
         userId,
+        email: rawEmail || null,
         machineId: tokens._qoderMachineId || "",
         organizationId: tokens._qoderOrganizationId || "",
       },

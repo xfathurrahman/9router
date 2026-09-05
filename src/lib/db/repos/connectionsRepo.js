@@ -84,6 +84,12 @@ function deriveConnectionName(data, fallbackName) {
       || data.email
       || fallbackName;
   }
+  if (data.provider === "qoder") {
+    return data.displayName
+      || data.providerSpecificData?.email
+      || data.email
+      || fallbackName;
+  }
   return fallbackName;
 }
 
@@ -149,6 +155,20 @@ export async function createProviderConnection(data) {
         if (incomingEmail && c.email && c.email.toLowerCase() === incomingEmail.toLowerCase()) {
           return true;
         }
+        return false;
+      });
+    } else if (data.provider === "qoder") {
+      const incomingToken = (data.apiKey || data.accessToken || "").trim();
+      const incomingUserId = data.providerSpecificData?.userId || data.userId;
+      const incomingEmail = (data.email || data.providerSpecificData?.email || "").trim().toLowerCase();
+
+      existing = all.find(c => {
+        const cToken = (c.apiKey || c.accessToken || "").trim();
+        if (incomingToken && cToken && incomingToken === cToken) return true;
+        const cUserId = c.providerSpecificData?.userId || c.userId;
+        if (incomingUserId && cUserId && incomingUserId === cUserId) return true;
+        const cEmail = (c.email || c.providerSpecificData?.email || "").trim().toLowerCase();
+        if (incomingEmail && cEmail && incomingEmail === cEmail) return true;
         return false;
       });
     } else if (data.authType === "oauth" && data.email) {
