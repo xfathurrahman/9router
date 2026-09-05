@@ -43,6 +43,19 @@ function connToRow(c) {
   };
 }
 
+function decodeJwtPayload(token) {
+  try {
+    if (!token || typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
 function upsert(db, c) {
   const r = connToRow(c);
   db.run(
@@ -62,6 +75,13 @@ function deriveConnectionName(data, fallbackName) {
       || data.providerSpecificData?.githubEmail
       || data.email
       || data.providerSpecificData?.githubName
+      || fallbackName;
+  }
+  if (data.provider === "codebuddy-intl" || data.provider === "codebuddy-cn") {
+    const jwt = decodeJwtPayload(data.accessToken) || decodeJwtPayload(data.refreshToken);
+    return jwt?.preferred_username
+      || jwt?.email
+      || data.email
       || fallbackName;
   }
   return fallbackName;
@@ -108,7 +128,30 @@ export async function createProviderConnection(data) {
     const all = db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [data.provider]).map(rowToConn);
 
     let existing = null;
-    if (data.authType === "oauth" && data.email) {
+
+    if (data.provider === "codebuddy-intl" || data.provider === "codebuddy-cn") {
+      const incomingJwt = decodeJwtPayload(data.accessToken) || decodeJwtPayload(data.refreshToken);
+      const incomingSub = incomingJwt?.sub || data.providerSpecificData?.userId;
+      const incomingEmail = data.email || incomingJwt?.email;
+
+      if (incomingJwt?.email && !data.email) data.email = incomingJwt.email;
+      if (incomingJwt?.preferred_username && (!data.name || /^Account \d+$/i.test(data.name))) {
+        data.name = incomingJwt.preferred_username;
+        data.displayName = incomingJwt.preferred_username;
+      }
+
+      existing = all.find(c => {
+        if (incomingSub) {
+          const cJwt = decodeJwtPayload(c.accessToken) || decodeJwtPayload(c.refreshToken);
+          const cSub = cJwt?.sub || c.providerSpecificData?.userId;
+          if (cSub && cSub === incomingSub) return true;
+        }
+        if (incomingEmail && c.email && c.email.toLowerCase() === incomingEmail.toLowerCase()) {
+          return true;
+        }
+        return false;
+      });
+    } else if (data.authType === "oauth" && data.email) {
       const incomingUsername = data.providerSpecificData?.username;
       const incomingWs = data.providerSpecificData?.chatgptAccountId;
       existing = all.find(c => {
